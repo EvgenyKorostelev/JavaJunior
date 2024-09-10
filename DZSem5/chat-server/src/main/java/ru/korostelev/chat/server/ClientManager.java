@@ -3,17 +3,21 @@ package ru.korostelev.chat.server;
 import java.io.*;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.StringTokenizer;
+import java.util.UUID;
 
 public class ClientManager implements Runnable {
 
     private final Socket socket;
+    private final UUID clientId;
+    private String name;
     private BufferedWriter bufferedWriter;
     private BufferedReader bufferedReader;
-    private String name;
     public final static ArrayList<ClientManager> clients = new ArrayList<>();
 
     public ClientManager(Socket socket) {
         this.socket = socket;
+        this.clientId = UUID.randomUUID();
         try {
             bufferedWriter = new BufferedWriter(new OutputStreamWriter(
                     socket.getOutputStream()));
@@ -55,10 +59,25 @@ public class ClientManager implements Runnable {
         broadcastMessage("Server: " + name + " покинул чат.");
     }
 
+    private void privateMessage(String destinationName,String message){
+        for (ClientManager client : clients) {
+            try {
+                if (client.name.equals(destinationName)) {
+                    client.bufferedWriter.write(message);
+                    client.bufferedWriter.newLine();
+                    client.bufferedWriter.flush();
+                }
+            } catch (IOException e) {
+            closeAllResource(socket, bufferedWriter, bufferedReader);
+            e.printStackTrace();
+        }
+        }
+    }
+
     private void broadcastMessage(String message) {
         for (ClientManager client : clients) {
             try {
-                if (!client.name.equals(this.name)) {// лучше по clientId
+                if (!client.getClientId().equals(this.clientId)) {
                     client.bufferedWriter.write(message);
                     client.bufferedWriter.newLine();
                     client.bufferedWriter.flush();
@@ -70,23 +89,32 @@ public class ClientManager implements Runnable {
         }
     }
 
-
     @Override
     public void run() {
         String messageFromClient;
         while (socket.isConnected()) {
             try {
                 messageFromClient = bufferedReader.readLine();
-                if(messageFromClient == null){
-                    closeAllResource(socket, bufferedWriter, bufferedReader);
-                    break;
+                //System.out.println(messageFromClient);
+                if(messageFromClient.startsWith(name + ": @")){
+                    messageFromClient = messageFromClient.replaceFirst(name + ": ", "");
+                    StringTokenizer tokens = new StringTokenizer(messageFromClient, " ");
+                    String destinationName = tokens.nextElement().toString().substring(1);
+                    messageFromClient = messageFromClient.replaceFirst("@" + destinationName + " ", "");
+                    messageFromClient = "от " + this.name + ": " + messageFromClient;
+                            privateMessage(destinationName, messageFromClient);
+                } else {
+                    broadcastMessage(messageFromClient);
                 }
-                broadcastMessage(messageFromClient);
             } catch (IOException e) {
                 closeAllResource(socket, bufferedWriter, bufferedReader);
                 e.printStackTrace();
                 break;
             }
         }
+    }
+
+    public UUID getClientId() {
+        return clientId;
     }
 }
